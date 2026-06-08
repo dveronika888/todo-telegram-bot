@@ -15,7 +15,7 @@ from database.db import (
     update_task,
 )
 from services.calendar_service import create_calendar_event
-from services.date_parser import parse_user_datetime
+from services.date_parser import parse_user_datetime, parse_task_message
 
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -25,13 +25,23 @@ user_states = {}
 
 def main_menu_keyboard():
     keyboard = types.InlineKeyboardMarkup()
+
     keyboard.add(types.InlineKeyboardButton("➕ Новая задача", callback_data="menu:new"))
+
     keyboard.add(
         types.InlineKeyboardButton("📋 Мои задачи", callback_data="menu:list"),
-        types.InlineKeyboardButton("✅ Выполненные", callback_data="menu:completed")
+        types.InlineKeyboardButton("✅ Выполненные", callback_data="menu:completed"),
     )
-    keyboard.add(types.InlineKeyboardButton("🧹 Очистить выполненные", callback_data="menu:clear_completed"))
+
+    keyboard.add(
+        types.InlineKeyboardButton(
+            "🧹 Очистить выполненные",
+            callback_data="menu:clear_completed"
+        )
+    )
+
     keyboard.add(types.InlineKeyboardButton("❓ Помощь", callback_data="menu:help"))
+
     return keyboard
 
 
@@ -43,14 +53,17 @@ def back_to_menu_keyboard():
 
 def task_keyboard(task_id):
     keyboard = types.InlineKeyboardMarkup()
+
     keyboard.add(
         types.InlineKeyboardButton("✅ Выполнить", callback_data=f"done:{task_id}"),
-        types.InlineKeyboardButton("🗑 Удалить", callback_data=f"delete:{task_id}")
+        types.InlineKeyboardButton("🗑 Удалить", callback_data=f"delete:{task_id}"),
     )
+
     keyboard.add(
         types.InlineKeyboardButton("✏️ Изменить", callback_data=f"edit:{task_id}"),
-        types.InlineKeyboardButton("🏠 На главную", callback_data="menu:main")
+        types.InlineKeyboardButton("🏠 На главную", callback_data="menu:main"),
     )
+
     return keyboard
 
 
@@ -141,8 +154,12 @@ def help_command(message):
         "📋 Мои задачи — посмотреть активные задачи\n"
         "✅ Выполненные — посмотреть завершённые задачи\n"
         "🧹 Очистить выполненные — удалить завершённые задачи\n\n"
-        "При создании задачи сначала введи текст задачи, затем дату и время.\n\n"
-        "Дата может быть указана так:\n"
+        "Задачу можно отправить одним сообщением.\n\n"
+        "Примеры:\n"
+        "Купить лекарства завтра в 18:00\n"
+        "Позвонить преподавателю 15 июня в 14:30\n"
+        "Встреча 01.07.2026 в 13:00 - 17:00\n\n"
+        "При редактировании дата может быть указана так:\n"
         "завтра, 12:00\n"
         "15 июня, 18:30\n"
         "01.07.2026, 13:00 - 17:00",
@@ -181,17 +198,22 @@ def clear_completed_command(message):
 
 @bot.callback_query_handler(func=lambda callback: callback.data == "menu:main")
 def menu_main(callback):
+    user_states.pop(callback.from_user.id, None)
     show_main_menu(callback.message.chat.id)
     bot.answer_callback_query(callback.id)
 
 
 @bot.callback_query_handler(func=lambda callback: callback.data == "menu:new")
 def menu_new_task(callback):
-    user_states[callback.from_user.id] = {"state": "waiting_for_task_text"}
+    user_states[callback.from_user.id] = {"state": "waiting_for_task_input"}
 
     bot.send_message(
         callback.message.chat.id,
-        "Отправь текст новой задачи."
+        "Отправь задачу одним сообщением.\n\n"
+        "Например:\n"
+        "Купить лекарства завтра в 18:00\n"
+        "Позвонить преподавателю 15 июня в 14:30\n"
+        "Встреча 01.07.2026 в 13:00 - 17:00"
     )
 
     bot.answer_callback_query(callback.id)
@@ -239,8 +261,12 @@ def menu_help(callback):
         "📋 Мои задачи — посмотреть активные задачи\n"
         "✅ Выполненные — посмотреть завершённые задачи\n"
         "🧹 Очистить выполненные — удалить завершённые задачи\n\n"
-        "При создании задачи сначала введи текст задачи, затем дату и время.\n\n"
-        "Дата может быть указана так:\n"
+        "Задачу можно отправить одним сообщением.\n\n"
+        "Примеры:\n"
+        "Купить лекарства завтра в 18:00\n"
+        "Позвонить преподавателю 15 июня в 14:30\n"
+        "Встреча 01.07.2026 в 13:00 - 17:00\n\n"
+        "При редактировании дата может быть указана так:\n"
         "завтра, 12:00\n"
         "15 июня, 18:30\n"
         "01.07.2026, 13:00 - 17:00",
@@ -337,36 +363,17 @@ def handle_message(message):
 
     state = state_data["state"]
 
-    if state == "waiting_for_task_text":
-        user_states[user_id] = {
-            "state": "waiting_for_task_datetime",
-            "task_text": message.text,
-        }
+    if state == "waiting_for_task_input":
+        task_text, start_time, end_time = parse_task_message(message.text)
 
-        bot.send_message(
-            chat_id,
-            "Задача принята.\n\n"
-            f"Текст задачи: «{message.text}»\n\n"
-            "Теперь укажи дату и время выполнения.\n\n"
-            "Например:\n"
-            "завтра, 12:00\n"
-            "15 июня, 18:30\n"
-            "01.07.2026, 13:00 - 17:00"
-        )
-        return
-
-    if state == "waiting_for_task_datetime":
-        task_text = state_data["task_text"]
-        start_time, end_time = parse_user_datetime(message.text)
-
-        if start_time is None:
+        if task_text is None:
             bot.send_message(
                 chat_id,
-                "Не удалось распознать дату и время.\n\n"
-                "Попробуй один из вариантов:\n"
-                "завтра, 12:00\n"
-                "15 июня, 18:30\n"
-                "01.07.2026, 13:00 - 17:00"
+                "Не удалось распознать задачу, дату или время.\n\n"
+                "Попробуй написать так:\n"
+                "Купить лекарства завтра в 18:00\n"
+                "Позвонить преподавателю 15 июня в 14:30\n"
+                "Встреча 01.07.2026 в 13:00 - 17:00"
             )
             return
 
@@ -401,7 +408,11 @@ def handle_message(message):
 
         bot.send_message(
             chat_id,
-            "Теперь отправь новую дату и время выполнения."
+            "Теперь отправь новую дату и время выполнения.\n\n"
+            "Например:\n"
+            "завтра, 12:00\n"
+            "15 июня, 18:30\n"
+            "01.07.2026, 13:00 - 17:00"
         )
         return
 
