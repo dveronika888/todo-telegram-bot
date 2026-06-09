@@ -324,13 +324,17 @@ def edit_callback(callback):
     user_id = callback.from_user.id
 
     user_states[user_id] = {
-        "state": "waiting_for_edit_text",
+        "state": "waiting_for_edit_input",
         "edit_task_id": task_id,
     }
 
     bot.send_message(
         callback.message.chat.id,
-        "Отправь новый текст задачи."
+        "Отправь обновлённую задачу одним сообщением.\n\n"
+        "Например:\n"
+        "Купить лекарства завтра в 18:00\n"
+        "Позвонить преподавателю 15 июня в 14:30\n"
+        "Встреча 01.07.2026 в 13:00 - 17:00"
     )
 
     bot.answer_callback_query(callback.id)
@@ -399,37 +403,19 @@ def handle_message(message):
         user_states.pop(user_id, None)
         return
 
-    if state == "waiting_for_edit_text":
-        user_states[user_id] = {
-            "state": "waiting_for_edit_datetime",
-            "edit_task_id": state_data["edit_task_id"],
-            "new_task_text": message.text,
-        }
-
-        bot.send_message(
-            chat_id,
-            "Теперь отправь новую дату и время выполнения.\n\n"
-            "Например:\n"
-            "завтра, 12:00\n"
-            "15 июня, 18:30\n"
-            "01.07.2026, 13:00 - 17:00"
-        )
-        return
-
-    if state == "waiting_for_edit_datetime":
+    if state == "waiting_for_edit_input":
         task_id = state_data["edit_task_id"]
-        new_text = state_data["new_task_text"]
 
-        start_time, end_time = parse_user_datetime(message.text)
+        new_text, start_time, end_time = parse_task_message(message.text)
 
-        if start_time is None:
+        if new_text is None:
             bot.send_message(
                 chat_id,
-                "Не удалось распознать дату и время.\n\n"
-                "Попробуй один из вариантов:\n"
-                "завтра, 12:00\n"
-                "15 июня, 18:30\n"
-                "01.07.2026, 13:00 - 17:00"
+                "Не удалось распознать задачу, дату или время.\n\n"
+                "Попробуй написать так:\n"
+                "Купить лекарства завтра в 18:00\n"
+                "Позвонить преподавателю 15 июня в 14:30\n"
+                "Встреча 01.07.2026 в 13:00 - 17:00"
             )
             return
 
@@ -453,7 +439,7 @@ def handle_message(message):
             )
 
         user_states.pop(user_id, None)
-
+        return
 
 if __name__ == "__main__":
     create_database()
