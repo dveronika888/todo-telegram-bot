@@ -13,8 +13,15 @@ from database.db import (
     delete_task,
     clear_completed_tasks,
     update_task,
+    update_calendar_event_id,
+    get_task_by_id,
+    get_completed_tasks_with_calendar_ids,
 )
-from services.calendar_service import create_calendar_event
+from services.calendar_service import (
+    create_calendar_event,
+    delete_calendar_event,
+    delete_calendar_events,
+)
 from services.date_parser import parse_task_message
 
 
@@ -49,6 +56,7 @@ def back_to_menu_keyboard():
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton("🏠 На главную", callback_data="menu:main"))
     return keyboard
+
 
 def task_keyboard(task_id):
     keyboard = types.InlineKeyboardMarkup()
@@ -157,11 +165,7 @@ def help_command(message):
         "Примеры:\n"
         "Купить лекарства завтра в 18:00\n"
         "Позвонить преподавателю 15 июня в 14:30\n"
-        "Встреча 01.07.2026 в 13:00 - 17:00\n\n"
-        "При редактировании дата может быть указана так:\n"
-        "завтра, 12:00\n"
-        "15 июня, 18:30\n"
-        "01.07.2026, 13:00 - 17:00",
+        "Встреча 01.07.2026 в 13:00 - 17:00",
         reply_markup=back_to_menu_keyboard()
     )
 
@@ -179,6 +183,16 @@ def completed_command(message):
 @bot.message_handler(commands=["clear_completed"])
 def clear_completed_command(message):
     user_id = message.from_user.id
+
+    completed_tasks = get_completed_tasks_with_calendar_ids(user_id)
+    calendar_event_ids = [
+        task["calendar_event_id"]
+        for task in completed_tasks
+        if task["calendar_event_id"]
+    ]
+
+    delete_calendar_events(calendar_event_ids)
+
     deleted_count = clear_completed_tasks(user_id)
 
     if deleted_count == 0:
@@ -233,6 +247,16 @@ def menu_completed(callback):
 @bot.callback_query_handler(func=lambda callback: callback.data == "menu:clear_completed")
 def menu_clear_completed(callback):
     user_id = callback.from_user.id
+
+    completed_tasks = get_completed_tasks_with_calendar_ids(user_id)
+    calendar_event_ids = [
+        task["calendar_event_id"]
+        for task in completed_tasks
+        if task["calendar_event_id"]
+    ]
+
+    delete_calendar_events(calendar_event_ids)
+
     deleted_count = clear_completed_tasks(user_id)
 
     if deleted_count == 0:
@@ -264,11 +288,7 @@ def menu_help(callback):
         "Примеры:\n"
         "Купить лекарства завтра в 18:00\n"
         "Позвонить преподавателю 15 июня в 14:30\n"
-        "Встреча 01.07.2026 в 13:00 - 17:00\n\n"
-        "При редактировании дата может быть указана так:\n"
-        "завтра, 12:00\n"
-        "15 июня, 18:30\n"
-        "01.07.2026, 13:00 - 17:00",
+        "Встреча 01.07.2026 в 13:00 - 17:00",
         reply_markup=back_to_menu_keyboard()
     )
 
@@ -300,6 +320,11 @@ def done_callback(callback):
 def delete_callback(callback):
     task_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
+
+    task = get_task_by_id(user_id, task_id)
+
+    if task and task["calendar_event_id"]:
+        delete_calendar_event(task["calendar_event_id"])
 
     success = delete_task(user_id, task_id)
 
@@ -380,14 +405,20 @@ def handle_message(message):
             )
             return
 
-        add_task(user_id, task_text, start_time)
+        task_id = add_task(user_id, task_text, start_time)
 
-        create_calendar_event(
+        calendar_event = create_calendar_event(
+            task_id=task_id,
+            user_id=user_id,
             title=task_text,
             start_time=start_time,
             end_time=end_time,
-            description=f"Задача пользователя Telegram ID: {user_id}"
         )
+
+        calendar_event_id = calendar_event.get("id")
+
+        if calendar_event_id:
+            update_calendar_event_id(user_id, task_id, calendar_event_id)
 
         formatted_date = format_date_for_user(start_time)
 
@@ -439,6 +470,7 @@ def handle_message(message):
 
         user_states.pop(user_id, None)
         return
+
 
 if __name__ == "__main__":
     create_database()
